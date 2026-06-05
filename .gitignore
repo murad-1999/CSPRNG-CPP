@@ -1,0 +1,5 @@
+# Build and binary outputs
+chacha20_csprng_test
+chacha20_csprng_test.exe
+build/
+.cache/
