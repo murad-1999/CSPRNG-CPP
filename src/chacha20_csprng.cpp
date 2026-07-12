@@ -35,12 +35,7 @@ void get_os_entropy(uint8_t* buffer, size_t size) {
             return;
         }
     }
-    
-    // Fallback to std::random_device if /dev/urandom is unavailable
-    std::random_device rd;
-    for (size_t i = 0; i < size; ++i) {
-        buffer[i] = static_cast<uint8_t>(rd() & 0xFF);
-    }
+    throw std::runtime_error("/dev/urandom is unavailable or failed to harvest secure entropy");
 #endif
 }
 
@@ -77,6 +72,13 @@ ChaCha20CSPRNG::ChaCha20CSPRNG(result_type value) {
     seed(value);
 }
 
+// Custom Destructor
+ChaCha20CSPRNG::~ChaCha20CSPRNG() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::fill(state_.begin(), state_.end(), 0);
+    std::fill(buffer_.begin(), buffer_.end(), 0);
+}
+
 // Custom Copy Constructor
 ChaCha20CSPRNG::ChaCha20CSPRNG(const ChaCha20CSPRNG& other) {
     std::lock_guard<std::mutex> lock(other.mutex_);
@@ -89,10 +91,16 @@ ChaCha20CSPRNG::ChaCha20CSPRNG(const ChaCha20CSPRNG& other) {
 // Custom Move Constructor
 ChaCha20CSPRNG::ChaCha20CSPRNG(ChaCha20CSPRNG&& other) noexcept {
     std::lock_guard<std::mutex> lock(other.mutex_);
-    state_ = std::move(other.state_);
-    buffer_ = std::move(other.buffer_);
+    state_ = other.state_;
+    buffer_ = other.buffer_;
     word_counter_ = other.word_counter_;
     cached_block_index_ = other.cached_block_index_;
+
+    // Securely clear the moved-from instance
+    std::fill(other.state_.begin(), other.state_.end(), 0);
+    std::fill(other.buffer_.begin(), other.buffer_.end(), 0);
+    other.word_counter_ = 0;
+    other.cached_block_index_ = std::numeric_limits<uint64_t>::max();
 }
 
 // Custom Copy Assignment
@@ -115,10 +123,16 @@ ChaCha20CSPRNG& ChaCha20CSPRNG::operator=(ChaCha20CSPRNG&& other) noexcept {
         std::unique_lock<std::mutex> lock_this(mutex_, std::defer_lock);
         std::unique_lock<std::mutex> lock_other(other.mutex_, std::defer_lock);
         std::lock(lock_this, lock_other);
-        state_ = std::move(other.state_);
-        buffer_ = std::move(other.buffer_);
+        state_ = other.state_;
+        buffer_ = other.buffer_;
         word_counter_ = other.word_counter_;
         cached_block_index_ = other.cached_block_index_;
+
+        // Securely clear the moved-from instance
+        std::fill(other.state_.begin(), other.state_.end(), 0);
+        std::fill(other.buffer_.begin(), other.buffer_.end(), 0);
+        other.word_counter_ = 0;
+        other.cached_block_index_ = std::numeric_limits<uint64_t>::max();
     }
     return *this;
 }
@@ -258,7 +272,6 @@ void ChaCha20CSPRNG::discard(unsigned long long z) {
     word_counter_ += z;
 }
 
-// Equality operators
 bool operator==(const ChaCha20CSPRNG& lhs, const ChaCha20CSPRNG& rhs) {
     if (&lhs == &rhs) return true;
     
@@ -291,14 +304,26 @@ std::ostream& operator<<(std::ostream& os, const ChaCha20CSPRNG& rng) {
 }
 
 std::istream& operator>>(std::istream& is, ChaCha20CSPRNG& rng) {
-    std::lock_guard<std::mutex> lock(rng.mutex_);
+    std::array<uint32_t, 16> temp_state{};
+    std::array<uint32_t, 16> temp_buffer{};
+    uint64_t temp_word_counter = 0;
+    uint64_t temp_cached_block_index = 0;
+
     for (int i = 0; i < 16; ++i) {
-        is >> rng.state_[i];
+        is >> temp_state[i];
     }
     for (int i = 0; i < 16; ++i) {
-        is >> rng.buffer_[i];
+        is >> temp_buffer[i];
     }
-    is >> rng.word_counter_ >> rng.cached_block_index_;
+    is >> temp_word_counter >> temp_cached_block_index;
+
+    if (is) {
+        std::lock_guard<std::mutex> lock(rng.mutex_);
+        rng.state_ = temp_state;
+        rng.buffer_ = temp_buffer;
+        rng.word_counter_ = temp_word_counter;
+        rng.cached_block_index_ = temp_cached_block_index;
+    }
     return is;
 }
 

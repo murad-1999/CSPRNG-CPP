@@ -230,6 +230,64 @@ void test_thread_safety() {
     std::cout << "test_thread_safety PASSED." << std::endl;
 }
 
+void test_security_fixes() {
+    std::cout << "Running test_security_fixes..." << std::endl;
+
+    // Test move constructor zeroing/clearing
+    {
+        csprng::ChaCha20CSPRNG rng1(12345);
+        rng1();
+        
+        csprng::ChaCha20CSPRNG rng2(std::move(rng1));
+        
+        std::stringstream ss;
+        ss << rng1;
+        
+        bool all_zeros = true;
+        for (int i = 0; i < 16; ++i) {
+            uint32_t val;
+            ss >> val;
+            if (val != 0) {
+                all_zeros = false;
+            }
+        }
+        TEST_ASSERT(all_zeros);
+    }
+
+    // Test move assignment zeroing/clearing
+    {
+        csprng::ChaCha20CSPRNG rng1(12345);
+        rng1();
+        csprng::ChaCha20CSPRNG rng2;
+        rng2 = std::move(rng1);
+        
+        std::stringstream ss;
+        ss << rng1;
+        bool all_zeros = true;
+        for (int i = 0; i < 16; ++i) {
+            uint32_t val;
+            ss >> val;
+            if (val != 0) {
+                all_zeros = false;
+            }
+        }
+        TEST_ASSERT(all_zeros);
+    }
+
+    // Test failed deserialization handling
+    {
+        csprng::ChaCha20CSPRNG rng1(999);
+        csprng::ChaCha20CSPRNG rng2(999);
+        
+        std::stringstream ss("corrupted data");
+        ss >> rng1; // Should fail, and not modify rng1
+        
+        TEST_ASSERT(rng1 == rng2);
+    }
+
+    std::cout << "test_security_fixes PASSED." << std::endl;
+}
+
 int main() {
     std::cout << "============================================" << std::endl;
     std::cout << "Starting CSPRNG-CPP Test Suite" << std::endl;
@@ -241,6 +299,7 @@ int main() {
     test_standard_compatibility();
     test_serialization();
     test_thread_safety();
+    test_security_fixes();
     
     std::cout << "============================================" << std::endl;
     std::cout << "All CSPRNG tests PASSED successfully!" << std::endl;

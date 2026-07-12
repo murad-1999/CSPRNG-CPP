@@ -48,7 +48,7 @@ public:
     ChaCha20CSPRNG& operator=(ChaCha20CSPRNG&& other) noexcept;
 
     // Destructor
-    ~ChaCha20CSPRNG() = default;
+    ~ChaCha20CSPRNG();
 
     // Seeding methods
     // 1. Reseed from secure OS-native entropy source

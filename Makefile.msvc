@@ -1,0 +1,17 @@
+# Makefile for MSVC (NMake)
+CXX = cl
+CXXFLAGS = /std:c++17 /W4 /EHsc /O2 /Iinclude
+
+SRCS = src\chacha20_csprng.cpp
+TEST_SRCS = tests\chacha20_csprng_test.cpp
+TARGET = chacha20_csprng_test.exe
+
+all: $(TARGET)
+
+$(TARGET): $(SRCS) $(TEST_SRCS)
+	$(CXX) $(CXXFLAGS) $(SRCS) $(TEST_SRCS) /Fe$(TARGET)
+
+clean:
+	-del /f $(TARGET) *.obj 2>nul
+
+.PHONY: all clean
