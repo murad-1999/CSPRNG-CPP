@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <stdexcept>
 #include <random>
+#include <cstring>
+#include <atomic>
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
@@ -61,6 +63,23 @@ inline void qr(uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) {
     c += d; b ^= c; b = rotl(b, 7);
 }
 
+// Portable secure memory wiping helper to prevent dead-store elimination
+void secure_zero(void* v, size_t n) {
+    if (!v || n == 0) return;
+#if defined(_WIN32) || defined(_WIN64)
+    SecureZeroMemory(v, n);
+#elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 25))
+    explicit_bzero(v, n);
+#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
+    explicit_bzero(v, n);
+#else
+    typedef void* (*memset_t)(void*, int, size_t);
+    static volatile memset_t memset_func = std::memset;
+    memset_func(v, 0, n);
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+#endif
+}
+
 } // namespace
 
 // Constructors
@@ -75,8 +94,8 @@ ChaCha20CSPRNG::ChaCha20CSPRNG(result_type value) {
 // Custom Destructor
 ChaCha20CSPRNG::~ChaCha20CSPRNG() {
     std::lock_guard<std::mutex> lock(mutex_);
-    std::fill(state_.begin(), state_.end(), 0);
-    std::fill(buffer_.begin(), buffer_.end(), 0);
+    secure_zero(state_.data(), sizeof(uint32_t) * state_.size());
+    secure_zero(buffer_.data(), sizeof(uint32_t) * buffer_.size());
 }
 
 // Custom Copy Constructor
@@ -97,8 +116,8 @@ ChaCha20CSPRNG::ChaCha20CSPRNG(ChaCha20CSPRNG&& other) noexcept {
     cached_block_index_ = other.cached_block_index_;
 
     // Securely clear the moved-from instance
-    std::fill(other.state_.begin(), other.state_.end(), 0);
-    std::fill(other.buffer_.begin(), other.buffer_.end(), 0);
+    secure_zero(other.state_.data(), sizeof(uint32_t) * other.state_.size());
+    secure_zero(other.buffer_.data(), sizeof(uint32_t) * other.buffer_.size());
     other.word_counter_ = 0;
     other.cached_block_index_ = std::numeric_limits<uint64_t>::max();
 }
@@ -129,8 +148,8 @@ ChaCha20CSPRNG& ChaCha20CSPRNG::operator=(ChaCha20CSPRNG&& other) noexcept {
         cached_block_index_ = other.cached_block_index_;
 
         // Securely clear the moved-from instance
-        std::fill(other.state_.begin(), other.state_.end(), 0);
-        std::fill(other.buffer_.begin(), other.buffer_.end(), 0);
+        secure_zero(other.state_.data(), sizeof(uint32_t) * other.state_.size());
+        secure_zero(other.buffer_.data(), sizeof(uint32_t) * other.buffer_.size());
         other.word_counter_ = 0;
         other.cached_block_index_ = std::numeric_limits<uint64_t>::max();
     }
@@ -245,6 +264,13 @@ ChaCha20CSPRNG::result_type ChaCha20CSPRNG::operator()() {
 }
 
 void ChaCha20CSPRNG::fill_bytes(uint8_t* dest, size_t size) {
+    if (size == 0) {
+        return;
+    }
+    if (dest == nullptr) {
+        throw std::invalid_argument("fill_bytes: dest buffer pointer cannot be nullptr");
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
     size_t offset = 0;
     while (offset < size) {
@@ -279,11 +305,17 @@ bool operator==(const ChaCha20CSPRNG& lhs, const ChaCha20CSPRNG& rhs) {
     std::unique_lock<std::mutex> lock_rhs(rhs.mutex_, std::defer_lock);
     std::lock(lock_lhs, lock_rhs);
 
-    // Compare constants (0..3), key (4..11), nonce (14..15), and current stream word_counter_
-    return std::equal(lhs.state_.begin(), lhs.state_.begin() + 12, rhs.state_.begin()) &&
-           lhs.state_[14] == rhs.state_[14] &&
-           lhs.state_[15] == rhs.state_[15] &&
-           lhs.word_counter_ == rhs.word_counter_;
+    // Constant-time comparison across state matrix (constants 0..3, key 4..11, nonce 14..15)
+    uint32_t diff = 0;
+    for (size_t i = 0; i < 12; ++i) {
+        diff |= (lhs.state_[i] ^ rhs.state_[i]);
+    }
+    diff |= (lhs.state_[14] ^ rhs.state_[14]);
+    diff |= (lhs.state_[15] ^ rhs.state_[15]);
+
+    uint64_t counter_diff = lhs.word_counter_ ^ rhs.word_counter_;
+
+    return (diff == 0) && (counter_diff == 0);
 }
 
 bool operator!=(const ChaCha20CSPRNG& lhs, const ChaCha20CSPRNG& rhs) {

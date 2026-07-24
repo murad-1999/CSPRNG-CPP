@@ -25,3 +25,12 @@ add_executable(chacha20_csprng_test
 # Link library and Threads dependency (required for concurrency test)
 find_package(Threads REQUIRED)
 target_link_libraries(chacha20_csprng_test PRIVATE csprng Threads::Threads)
+
+# Optional AddressSanitizer and UndefinedBehaviorSanitizer configuration
+option(ENABLE_SANITIZERS "Enable Address and UndefinedBehavior Sanitizers" OFF)
+if(ENABLE_SANITIZERS)
+    target_compile_options(csprng PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_compile_options(chacha20_csprng_test PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(chacha20_csprng_test PUBLIC -fsanitize=address,undefined)
+endif()
+

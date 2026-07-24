@@ -288,6 +288,45 @@ void test_security_fixes() {
     std::cout << "test_security_fixes PASSED." << std::endl;
 }
 
+void test_memory_security_and_edge_cases() {
+    std::cout << "Running test_memory_security_and_edge_cases..." << std::endl;
+
+    csprng::ChaCha20CSPRNG rng(12345);
+
+    // 1. Test fill_bytes with nullptr and size > 0 (must throw std::invalid_argument)
+    bool threw_exception = false;
+    try {
+        rng.fill_bytes(nullptr, 32);
+    } catch (const std::invalid_argument&) {
+        threw_exception = true;
+    }
+    TEST_ASSERT(threw_exception);
+
+    // 2. Test fill_bytes with nullptr and size == 0 (must not throw or crash)
+    try {
+        rng.fill_bytes(nullptr, 0);
+    } catch (...) {
+        TEST_ASSERT(false);
+    }
+
+    // 3. Test fill_bytes with valid buffer and size == 0
+    uint8_t buffer[10] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    rng.fill_bytes(buffer, 0);
+    for (int i = 0; i < 10; ++i) {
+        TEST_ASSERT(buffer[i] == 0xFF);
+    }
+
+    // 4. Test constant-time equality check across identical and different states
+    csprng::ChaCha20CSPRNG rng1(555);
+    csprng::ChaCha20CSPRNG rng2(555);
+    csprng::ChaCha20CSPRNG rng3(556);
+
+    TEST_ASSERT(rng1 == rng2);
+    TEST_ASSERT(rng1 != rng3);
+
+    std::cout << "test_memory_security_and_edge_cases PASSED." << std::endl;
+}
+
 int main() {
     std::cout << "============================================" << std::endl;
     std::cout << "Starting CSPRNG-CPP Test Suite" << std::endl;
@@ -300,6 +339,7 @@ int main() {
     test_serialization();
     test_thread_safety();
     test_security_fixes();
+    test_memory_security_and_edge_cases();
     
     std::cout << "============================================" << std::endl;
     std::cout << "All CSPRNG tests PASSED successfully!" << std::endl;
@@ -307,3 +347,4 @@ int main() {
     
     return 0;
 }
+
