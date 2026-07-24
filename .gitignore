@@ -5,3 +5,4 @@ csprng_demo
 csprng_visualizer
 build/
 .cache/
+chacha20_csprng_test_sanitizer
